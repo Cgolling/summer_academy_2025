@@ -3,7 +3,6 @@
 import librosa
 import midiutil
 import mido
-
 import sounddevice as sd
 
 
@@ -20,7 +19,7 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
 
 if __name__ == "__main__":
     print("Starting...")
-    filename = librosa.ex('trumpet')
+    filename = librosa.ex("trumpet")
     audio_data, s_rate = librosa.load(filename, sr=None)
     print("Audio file loaded!")
     result = wave_to_midi(audio_data, s_rate=s_rate)
@@ -30,8 +29,11 @@ if __name__ == "__main__":
     if isinstance(result, mido.MidiFile):
         result.save("output.mid")  # Save the MIDI file using mido
     elif isinstance(result, midiutil.MIDIFile):
-        with open("output.mid", 'wb') as file:
+        with open("output.mid", "wb") as file:
             result.writeFile(file)  # Save the MIDI file using midiutil
     else:
-        raise TypeError("The result must be a mido.MidiFile or midiutil.MIDIFile instance.")
+        raise TypeError(
+            "The result must be a mido.MidiFile or midiutil.MIDIFile instance."
+        )
+
     print("Done. Exiting!")
