@@ -12,6 +12,8 @@ from midiutil.MidiFile import MIDIFile
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
+DURATION_THRESHOLD = 0.25
+
 
 def create_spectrogram(audio_data, s_rate):
     # Compute the Short-Time Fourier Transform (STFT) to get a spectrogram
@@ -145,6 +147,11 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     :return: A MIDI object.
     """
 
+    # Extract tempo from audio
+    tempo, beats = librosa.beat.beat_track(y=audio_data, sr=s_rate)
+    tempo = float(tempo)  # Convert numpy array to scalar
+    print(f"Detected tempo: {tempo:.1f} BPM")
+
     spectrogram = create_spectrogram(audio_data, s_rate)
     # visualise_spectrogram(spectrogram, title="Original Spectrogram")
 
@@ -178,7 +185,7 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     # visualise_found_freqs(prominent_freqs, s_rate)
 
     fundamental_freqs = [freqs[0] for freqs in prominent_freqs if len(freqs) > 0]
-    # plot_fundamental_freqs(fundamental_freqs)
+    plot_fundamental_freqs(fundamental_freqs)
 
     A4_frequency = 440.0  # = 12th_sqrt(2)
     raw_notes = [
@@ -192,25 +199,57 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
 
     midi_pitches = [int(note + 69) for note in rounded_notes]
 
+    # Convert frame-based durations to time-based durations
+    hop_length = 512  # Default hop length for librosa.stft
+    frame_duration = hop_length / s_rate  # Duration of each frame in seconds
+
+    midi_notes = []
+    current_pitch = midi_pitches[0]
+    duration_frames = 1
+
+    for pitch in midi_pitches[1:]:
+        if pitch != current_pitch:
+            # Convert frame duration to beats (quarter notes)
+            duration_seconds = duration_frames * frame_duration
+            duration_beats = (duration_seconds * tempo) / 60.0
+            if duration_beats < DURATION_THRESHOLD:
+                midi_notes.append((None, duration_beats))
+            else:
+                midi_notes.append((current_pitch, duration_beats))
+            current_pitch = pitch
+            duration_frames = 0
+        duration_frames += 1
+
+    # Add the last note
+    if duration_frames > 0:
+        duration_seconds = duration_frames * frame_duration
+        duration_beats = (duration_seconds * tempo) / 60.0
+        midi_notes.append((current_pitch, duration_beats))
+
+    print("MIDI notes:", midi_notes)
+
     plt.show()
 
     # degrees = [60, 62, 64, 65, 67, 69, 71, 72]  # MIDI note number
     track = 0
     channel = 0
     time = 0  # In beats
-    duration = 1  # In beats
-    tempo = 60  # In BPM
     volume = 100  # 0-127, as per the MIDI standard
 
     MyMIDI = MIDIFile(1)  # One track, defaults to format 1 (tempo track
     # automatically created)
     MyMIDI.addTempo(track, time, tempo)
 
-    for pitch in midi_pitches:
+    for pitch, duration in midi_notes:
+        if pitch is None:
+            time = time + duration
+            continue
         MyMIDI.addNote(track, channel, pitch, time, duration, volume)
-        time = time + 1
+        time = time + duration
 
-    with open("v0.mid", "wb") as output_file:
+    print("MIDI created with tempo:", tempo, "BPM", "\n overall duration:", time)
+
+    with open("v2.mid", "wb") as output_file:
         MyMIDI.writeFile(output_file)
 
 
