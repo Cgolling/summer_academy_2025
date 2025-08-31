@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 
+import math
+
 import librosa
 import matplotlib.pyplot as plt
 import midiutil
 import mido
 import numpy as np
 import sounddevice as sd
+from midiutil.MidiFile import MIDIFile
 from scipy.ndimage import gaussian_filter1d
+from scipy.signal import find_peaks
 
 
 def create_spectrogram(audio_data, s_rate):
@@ -42,6 +46,96 @@ def smooth_spectrogram(spectrogram, sigma=1.0):
     return smoothed
 
 
+def find_prominent_frequencies(
+    spectrogram, s_rate, height=None, distance=None, prominence=None
+):
+    """
+    Find prominent frequencies in each time window of the spectrogram using peak detection.
+
+    :param spectrogram: The input spectrogram array (frequency x time)
+    :param s_rate: Sample rate of the audio
+    :param height: Minimum height of peaks (if None, uses adaptive threshold)
+    :param distance: Minimum distance between peaks in frequency bins
+    :param prominence: Minimum prominence of peaks
+    :return: List of arrays, each containing prominent frequency indices for each time frame
+    """
+    # Get frequency bins from librosa
+    n_fft = (spectrogram.shape[0] - 1) * 2  # Reconstruct n_fft from spectrogram shape
+    freqs = librosa.fft_frequencies(sr=s_rate, n_fft=n_fft)
+
+    prominent_freqs_per_time = []
+
+    # Process each time frame
+    for time_idx in range(spectrogram.shape[1]):
+        magnitude_spectrum = spectrogram[:, time_idx]
+
+        # Set default parameters if not provided
+        if height is None:
+            # Use adaptive height based on local statistics
+            adaptive_height = np.percentile(magnitude_spectrum, 75)
+        else:
+            adaptive_height = height
+
+        if distance is None:
+            # Default distance to prevent too many close peaks
+            distance = max(1, len(magnitude_spectrum) // 50)
+
+        if prominence is None:
+            # Default prominence
+            prominence = adaptive_height * 0.1
+
+        # Find peaks in the magnitude spectrum
+        peaks, properties = find_peaks(
+            magnitude_spectrum,
+            height=adaptive_height,
+            distance=distance,
+            prominence=prominence,
+        )
+
+        # Convert frequency bin indices to actual frequencies
+        prominent_frequencies = freqs[peaks]
+
+        prominent_freqs_per_time.append(prominent_frequencies)
+
+    return prominent_freqs_per_time
+
+
+def visualise_found_freqs(prominent_freqs, s_rate):
+    # Create a plot for prominent frequencies over time
+    plt.figure(figsize=(12, 8))
+
+    # Get time frames
+    time_frames = np.arange(len(prominent_freqs))
+    hop_length = 512  # Default hop length for librosa.stft
+    time_seconds = librosa.frames_to_time(time_frames, sr=s_rate, hop_length=hop_length)
+
+    # Plot each prominent frequency as a scatter plot
+    for i, freqs in enumerate(prominent_freqs):
+        if len(freqs) > 0:
+            plt.scatter(
+                [time_seconds[i]] * len(freqs), freqs, c="blue", alpha=0.6, s=10
+            )
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency (Hz)")
+    plt.title("Prominent Frequencies Over Time")
+    plt.ylim(0, 4000)  # Limit y-axis to reasonable frequency range
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+
+def plot_fundamental_freqs(fundamental_freqs):
+    plt.figure(figsize=(12, 4))
+    plt.plot(fundamental_freqs)
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Frequency (Hz)")
+    plt.title("Fundamental Frequency Over Time")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
+
 def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     """
     Converts audio data to MIDI format.
@@ -52,11 +146,11 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     """
 
     spectrogram = create_spectrogram(audio_data, s_rate)
-    visualise_spectrogram(spectrogram, title="Original Spectrogram")
+    # visualise_spectrogram(spectrogram, title="Original Spectrogram")
 
     # Make smooth
     smoothed_spectrogram = smooth_spectrogram(spectrogram)
-    visualise_spectrogram(smoothed_spectrogram, title="Smoothed Spectrogram")
+    # visualise_spectrogram(smoothed_spectrogram, title="Smoothed Spectrogram")
 
     # Add cutoff threshold
     # Calculate adaptive threshold using local statistics
@@ -78,9 +172,46 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
             smoothed_spectrogram[:, i] < adaptive_threshold[i]
         ] = 0
 
-    visualise_spectrogram(thresholded_spectrogram, title="Thresholded Spectrogram")
+    # visualise_spectrogram(thresholded_spectrogram, title="Thresholded Spectrogram")
+
+    prominent_freqs = find_prominent_frequencies(thresholded_spectrogram, s_rate)
+    # visualise_found_freqs(prominent_freqs, s_rate)
+
+    fundamental_freqs = [freqs[0] for freqs in prominent_freqs if len(freqs) > 0]
+    # plot_fundamental_freqs(fundamental_freqs)
+
+    A4_frequency = 440.0  # = 12th_sqrt(2)
+    raw_notes = [
+        math.log(freq / A4_frequency) / math.log(2 ** (1 / 12))
+        for freq in fundamental_freqs
+    ]
+    print(raw_notes)
+
+    rounded_notes = [round(note) for note in raw_notes]
+    print(rounded_notes)
+
+    midi_pitches = [int(note + 69) for note in rounded_notes]
 
     plt.show()
+
+    # degrees = [60, 62, 64, 65, 67, 69, 71, 72]  # MIDI note number
+    track = 0
+    channel = 0
+    time = 0  # In beats
+    duration = 1  # In beats
+    tempo = 60  # In BPM
+    volume = 100  # 0-127, as per the MIDI standard
+
+    MyMIDI = MIDIFile(1)  # One track, defaults to format 1 (tempo track
+    # automatically created)
+    MyMIDI.addTempo(track, time, tempo)
+
+    for pitch in midi_pitches:
+        MyMIDI.addNote(track, channel, pitch, time, duration, volume)
+        time = time + 1
+
+    with open("v0.mid", "wb") as output_file:
+        MyMIDI.writeFile(output_file)
 
 
 if __name__ == "__main__":
