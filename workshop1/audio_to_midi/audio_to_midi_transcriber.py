@@ -3,7 +3,29 @@
 import librosa
 import midiutil
 import mido
+import numpy as np
 import sounddevice as sd
+
+
+def create_spectrogram(audio_data, s_rate):
+    # Compute the Short-Time Fourier Transform (STFT) to get a spectrogram
+    stft = librosa.stft(audio_data)
+    spectrogram = np.abs(stft)
+
+    return spectrogram
+
+
+def visualise_spectrogram(spectrogram):
+    plt.figure(figsize=(12, 8))
+    librosa.display.specshow(
+        librosa.amplitude_to_db(spectrogram, ref=np.max),
+        y_axis="log",
+        x_axis="time",
+    )
+    plt.colorbar(format="%+2.0f dB")
+    plt.title("Spectrogram")
+    plt.tight_layout()
+    plt.show()
 
 
 def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
@@ -14,7 +36,9 @@ def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     :param s_rate: The sample rate of the audio data.
     :return: A MIDI object.
     """
-    ...
+
+    spectrogram = create_spectrogram(audio_data, s_rate)
+    visualise_spectrogram(spectrogram)
 
 
 if __name__ == "__main__":
