@@ -4,6 +4,8 @@ import librosa
 import midiutil
 import mido
 
+import sounddevice as sd
+
 
 def wave_to_midi(audio_data, s_rate) -> mido.MidiFile | midiutil.MIDIFile:
     """
@@ -22,6 +24,9 @@ if __name__ == "__main__":
     audio_data, s_rate = librosa.load(filename, sr=None)
     print("Audio file loaded!")
     result = wave_to_midi(audio_data, s_rate=s_rate)
+    sd.play(audio_data, s_rate)
+    sd.wait()
+
     if isinstance(result, mido.MidiFile):
         result.save("output.mid")  # Save the MIDI file using mido
     elif isinstance(result, midiutil.MIDIFile):
